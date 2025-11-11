@@ -51,21 +51,23 @@
     <label>Speed: <span id="spdLabel">70</span>%</label>
     <input id="spd" type="range" min="0" max="100" value="70" oninput="spdLabel.textContent=this.value">
     <div class="row">
-      <button onclick="remote(1)">Forward</button>
-      <button onclick="remote(2)">Backward</button>
-    </div>
-    <div class="row">
-      <button onclick="remote(3)">Left</button>
-      <button onclick="remote(4)">Right</button>
-    </div>
-    <button class="block muted" onclick="remote(5)">Stop</button>
-  </div>
+      <button onclick="connect()">Connect</button>
+<button onclick="disconnect()">Disconnect</button>
 
-  <div class="card">
-    <div class="title">Features</div>
-    <div class="row">
-      <button onclick="feature(1)">CACC</button>
-      <button onclick="feature(2)">IMA</button>
+<!-- Modes -->
+<button onclick="setIdle()">Idle</button>
+<button onclick="setAuto()">Auto</button>
+<button onclick="setRemote()">Remote</button>
+<button onclick="setCACC()">CACC</button>
+<button onclick="setIMA()">IMA</button>
+
+<!-- Remote controls -->
+<button onclick="goF()">Forward</button>
+<button onclick="goB()">Backward</button>
+<button onclick="goL()">Left</button>
+<button onclick="goR()">Right</button>
+<button onclick="goS()">Stop</button>
+
     </div>
     <div class="status">In Auto mode, UI stays idle while STM32 runs logic.</div>
   </div>
@@ -75,79 +77,38 @@
 const SERVICE_UUID = '0000abcd-0000-1000-8000-00805f9b34fb';
 const CHAR_UUID    = '0000dcba-0000-1000-8000-00805f9b34fb';
 
-let device, server, writeChar, keepAliveTimer=null, mode=0;
-
-const remotePanel = document.getElementById('remotePanel');
-const statusEl = document.getElementById('status');
-const spd = document.getElementById('spd');
-const spdLabel = document.getElementById('spdLabel');
-
-function setStatus(s){ statusEl.textContent = s; }
+let writeChar = null;
 
 async function connect(){
-  try{
-    device = await navigator.bluetooth.requestDevice({ filters:[{ services:[SERVICE_UUID]}] });
-    server = await device.gatt.connect();
-    const svc = await server.getPrimaryService(SERVICE_UUID);
-    writeChar = await svc.getCharacteristic(CHAR_UUID);
-    setStatus('Connected');
-    startKeepAlive();
-  }catch(e){ setStatus('Connect failed: '+e); }
+  const device = await navigator.bluetooth.requestDevice({ filters:[{ services:[SERVICE_UUID]}] });
+  const server = await device.gatt.connect();
+  const svc = await server.getPrimaryService(SERVICE_UUID);
+  writeChar = await svc.getCharacteristic(CHAR_UUID);
+  alert('Connected');
 }
 
-function disconnect(){
-  stopKeepAlive();
-  if(device && device.gatt.connected) device.gatt.disconnect();
-  setStatus('Disconnected');
+function disconnect(){ try{ writeChar.service.device.gatt.disconnect(); }catch(_){} }
+
+async function sendChar(ch){
+  if(!writeChar){ alert('Not connected'); return; }
+  const data = new Uint8Array([ ch.charCodeAt(0) ]);
+  await writeChar.writeValueWithoutResponse(data);
 }
 
-function startKeepAlive(){
-  stopKeepAlive();
-  keepAliveTimer = setInterval(()=> sendPacket(4,0,0), 300); // TYPE=4
-}
-function stopKeepAlive(){
-  if(keepAliveTimer){ clearInterval(keepAliveTimer); keepAliveTimer=null; }
-}
+/* Buttons → exact mapping */
+function setAuto()   { sendChar('1'); }   // Auto
+function setIdle()   { sendChar('0'); }   // Idle
+function setRemote() { sendChar('2'); }   // Remote
+function setCACC()   { sendChar('3'); }   // CACC
+function setIMA()    { sendChar('4'); }   // IMA
 
-function crc8(arr){
-  let crc=0x00;
-  for(let b of arr){
-    crc ^= b;
-    for(let i=0;i<8;i++){
-      crc = (crc & 0x80) ? ((crc<<1)^0x31) & 0xFF : (crc<<1) & 0xFF;
-    }
-  }
-  return crc;
-}
-
-async function sendPacket(type, value, arg){
-  if(!writeChar){ setStatus('Not connected'); return; }
-  const pkt = new Uint8Array([0xAA, type & 0xFF, value & 0xFF, arg & 0xFF, 0x00]);
-  pkt[4] = crc8(pkt.slice(0,4));
-  try{
-    await writeChar.writeValueWithoutResponse(pkt);
-  }catch(e){
-    setStatus('Send error: '+e);
-  }
-}
-
-function sysOn(){ sendPacket(0,1,0); mode=0; remotePanel.style.display='none'; }
-function sysOff(){ sendPacket(0,0,0); mode=0; remotePanel.style.display='none'; }
-
-function setMode(m){
-  sendPacket(1, m, 0);
-  mode = m;
-  // 1=REMOTE shows panel; 2=AUTO hides panel
-  remotePanel.style.display = (m===1) ? 'block' : 'none';
-}
-
-function remote(dir){
-  if(mode!==1){ setStatus('Select Remote mode first'); return; }
-  const speed = parseInt(spd.value,10);
-  sendPacket(2, dir, speed);
-}
-
-function feature(f){ sendPacket(3, f, 0); }
+function goF() { sendChar('F'); } // Forward
+function goB() { sendChar('B'); } // Backward
+function goR() { sendChar('R'); } // Right
+function goL() { sendChar('L'); } // Left
+function goS() { sendChar('S'); } // Stop
 </script>
+
 </body>
 </html>
+
