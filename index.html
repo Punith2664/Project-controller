@@ -1,114 +1,96 @@
 <!doctype html>
 <html lang="en">
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Drive Controller</title>
+<title>Elite DriveGuard BLE Controller</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 0; background:#0b0f14; color:#e6edf3; }
-  .wrap { max-width: 520px; margin: 0 auto; padding: 16px; }
-  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
-  button { font-size: 18px; padding: 16px; border-radius: 14px; border: 0; background:#1f2937; color:#e6edf3; }
-  button:active { transform: scale(0.98); }
-  .primary { background:#2563eb; }
-  .danger { background:#ef4444; }
-  .ok { background:#16a34a; }
-  .muted { background:#374151; }
-  .block { display:block; width:100%; margin: 8px 0; }
-  .card { background:#111827; padding:12px; border-radius:16px; }
-  .title { font-size:20px; margin: 6px 0 12px; }
-  .hidden { display:none; }
-  input[type=range]{ width:100%; }
-  .status{ font-size:14px; opacity:0.8; }
+  body{font-family:system-ui,sans-serif;margin:0;background:#0b0f14;color:#e6edf3}
+  .wrap{max-width:520px;margin:0 auto;padding:16px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+  button{font-size:18px;padding:16px;border-radius:14px;border:0;background:#1f2937;color:#e6edf3}
+  button:active{transform:scale(.98)}
+  .primary{background:#2563eb}.danger{background:#ef4444}.ok{background:#16a34a}.muted{background:#374151}
+  .card{background:#111827;padding:12px;border-radius:16px;margin:12px 0}.title{font-size:20px;margin:6px 0 12px}
+  .status{font-size:14px;opacity:.85}
 </style>
 <body>
 <div class="wrap">
-  <h2>Drive Controller</h2>
+  <h2>Elite DriveGuard BLE Controller</h2>
+
   <div class="card">
     <div class="row">
       <button class="primary" onclick="connect()">Connect</button>
       <button class="danger" onclick="disconnect()">Disconnect</button>
     </div>
-    <div class="status" id="status">Not connected</div>
+    <div id="status" class="status">Not connected</div>
   </div>
 
   <div class="card">
-    <div class="title">Power</div>
+    <div class="title">Modes</div>
     <div class="row">
-      <button class="ok" onclick="sysOn()">Turn ON</button>
-      <button class="danger" onclick="sysOff()">Turn OFF</button>
+      <button onclick="sendChar('0')">Idle (0)</button>
+      <button class="ok" onclick="sendChar('1')">Auto (1)</button>
+    </div>
+    <div class="row">
+      <button onclick="sendChar('2')">Remote (2)</button>
+      <button onclick="sendChar('3')">CACC (3)</button>
+    </div>
+    <div class="row">
+      <button onclick="sendChar('4')">IMA (4)</button>
     </div>
   </div>
 
   <div class="card">
-    <div class="title">Mode</div>
-    <div class="row">
-      <button onclick="setMode(1)">Remote</button>
-      <button class="muted" onclick="setMode(2)">Auto</button>
-    </div>
-  </div>
-
-  <div class="card" id="remotePanel" class="hidden">
     <div class="title">Remote Controls</div>
-    <label>Speed: <span id="spdLabel">70</span>%</label>
-    <input id="spd" type="range" min="0" max="100" value="70" oninput="spdLabel.textContent=this.value">
     <div class="row">
-      <button onclick="connect()">Connect</button>
-<button onclick="disconnect()">Disconnect</button>
-
-<!-- Modes -->
-<button onclick="setIdle()">Idle</button>
-<button onclick="setAuto()">Auto</button>
-<button onclick="setRemote()">Remote</button>
-<button onclick="setCACC()">CACC</button>
-<button onclick="setIMA()">IMA</button>
-
-<!-- Remote controls -->
-<button onclick="goF()">Forward</button>
-<button onclick="goB()">Backward</button>
-<button onclick="goL()">Left</button>
-<button onclick="goR()">Right</button>
-<button onclick="goS()">Stop</button>
-
+      <button onclick="sendChar('F')">Forward (F)</button>
+      <button onclick="sendChar('B')">Backward (B)</button>
     </div>
-    <div class="status">In Auto mode, UI stays idle while STM32 runs logic.</div>
+    <div class="row">
+      <button onclick="sendChar('L')">Left (L)</button>
+      <button onclick="sendChar('R')">Right (R)</button>
+    </div>
+    <button class="muted" style="width:100%" onclick="sendChar('S')">Stop (S)</button>
   </div>
 </div>
 
 <script>
 const SERVICE_UUID = '0000abcd-0000-1000-8000-00805f9b34fb';
 const CHAR_UUID    = '0000dcba-0000-1000-8000-00805f9b34fb';
+let device, server, writeChar;
 
-let writeChar = null;
+const statusEl = document.getElementById('status');
+function setStatus(t){ statusEl.textContent = t; }
 
 async function connect(){
-  const device = await navigator.bluetooth.requestDevice({ filters:[{ services:[SERVICE_UUID]}] });
-  const server = await device.gatt.connect();
-  const svc = await server.getPrimaryService(SERVICE_UUID);
-  writeChar = await svc.getCharacteristic(CHAR_UUID);
-  alert('Connected');
+  try{
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'My_STM32_Car' }],
+      optionalServices: [SERVICE_UUID]
+    });
+    server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(SERVICE_UUID);
+    writeChar = await svc.getCharacteristic(CHAR_UUID);
+    device.addEventListener('gattserverdisconnected', () => setStatus('Disconnected'));
+    setStatus('Connected to ' + (device.name || 'ESP32'));
+  }catch(e){
+    setStatus('Connect failed: ' + e);
+  }
 }
 
-function disconnect(){ try{ writeChar.service.device.gatt.disconnect(); }catch(_){} }
+function disconnect(){
+  try{ if(device?.gatt?.connected) device.gatt.disconnect(); }catch(e){}
+  setStatus('Disconnected');
+}
 
 async function sendChar(ch){
-  if(!writeChar){ alert('Not connected'); return; }
-  const data = new Uint8Array([ ch.charCodeAt(0) ]);
-  await writeChar.writeValueWithoutResponse(data);
+  if(!writeChar){ setStatus('Not connected'); return; }
+  try{
+    await writeChar.writeValueWithoutResponse(Uint8Array.of(ch.charCodeAt(0)));
+    console.log("Sent:", ch);
+  }catch(e){
+    setStatus('Send error: ' + e);
+  }
 }
-
-/* Buttons → exact mapping */
-function setAuto()   { sendChar('1'); }   // Auto
-function setIdle()   { sendChar('0'); }   // Idle
-function setRemote() { sendChar('2'); }   // Remote
-function setCACC()   { sendChar('3'); }   // CACC
-function setIMA()    { sendChar('4'); }   // IMA
-
-function goF() { sendChar('F'); } // Forward
-function goB() { sendChar('B'); } // Backward
-function goR() { sendChar('R'); } // Right
-function goL() { sendChar('L'); } // Left
-function goS() { sendChar('S'); } // Stop
 </script>
-
 </body>
 </html>
-
