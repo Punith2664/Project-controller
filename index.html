@@ -1,20 +1,22 @@
 <!doctype html>
 <html lang="en">
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Elite DriveGuard BLE Controller</title>
+<title>Elite DriveGuard BLE Controller + OTA</title>
 <style>
   body{font-family:system-ui,sans-serif;margin:0;background:#0b0f14;color:#e6edf3}
-  .wrap{max-width:520px;margin:0 auto;padding:16px}
+  .wrap{max-width:720px;margin:0 auto;padding:16px}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
-  button{font-size:18px;padding:16px;border-radius:14px;border:0;background:#1f2937;color:#e6edf3}
-  button:active{transform:scale(.98)}
+  button{font-size:16px;padding:12px;border-radius:12px;border:0;background:#1f2937;color:#e6edf3}
   .primary{background:#2563eb}.danger{background:#ef4444}.ok{background:#16a34a}.muted{background:#374151}
-  .card{background:#111827;padding:12px;border-radius:16px;margin:12px 0}.title{font-size:20px;margin:6px 0 12px}
-  .status{font-size:14px;opacity:.85}
+  .card{background:#111827;padding:12px;border-radius:12px;margin:12px 0}.title{font-size:18px;margin:6px 0 12px}
+  input[type=file]{color:#fff}
+  #progress{width:100%;height:14px;background:#111827;border-radius:8px;overflow:hidden;border:1px solid #222}
+  #bar{height:100%;width:0%;background:#16a34a}
+  .status{font-size:14px;opacity:.9;margin-top:8px}
 </style>
 <body>
 <div class="wrap">
-  <h2>Elite DriveGuard BLE Controller</h2>
+  <h2>Elite DriveGuard BLE Controller + OTA</h2>
 
   <div class="card">
     <div class="row">
@@ -51,15 +53,29 @@
     </div>
     <button class="muted" style="width:100%" onclick="sendChar('S')">Stop (S)</button>
   </div>
+
+  <div class="card">
+    <div class="title">OTA — Upload firmware to STM32 via ESP32</div>
+    <input id="fileInput" type="file" accept=".bin" /><br/><br/>
+    <div class="row">
+      <button onclick="startOTA()" class="primary">Start OTA</button>
+      <button onclick="cancelOTA()" class="danger">Cancel OTA</button>
+    </div>
+    <div id="progress" style="margin-top:12px"><div id="bar"></div></div>
+    <div id="otastatus" class="status">No OTA in progress</div>
+  </div>
 </div>
 
 <script>
 const SERVICE_UUID = '0000abcd-0000-1000-8000-00805f9b34fb';
 const CHAR_UUID    = '0000dcba-0000-1000-8000-00805f9b34fb';
 let device, server, writeChar;
-
 const statusEl = document.getElementById('status');
+const otaStatus = document.getElementById('otastatus');
+const bar = document.getElementById('bar');
+
 function setStatus(t){ statusEl.textContent = t; }
+function setOta(s){ otaStatus.textContent = s; }
 
 async function connect(){
   try{
@@ -76,12 +92,12 @@ async function connect(){
     setStatus('Connect failed: ' + e);
   }
 }
-
 function disconnect(){
   try{ if(device?.gatt?.connected) device.gatt.disconnect(); }catch(e){}
   setStatus('Disconnected');
 }
 
+/* send single control char */
 async function sendChar(ch){
   if(!writeChar){ setStatus('Not connected'); return; }
   try{
@@ -90,6 +106,83 @@ async function sendChar(ch){
   }catch(e){
     setStatus('Send error: ' + e);
   }
+}
+
+/* ---------- CRC32 helper (JS) ---------- */
+/* polynomial 0xEDB88320, standard CRC32 */
+function crc32(buf) {
+  let table = crc32.table;
+  if(!table) {
+    table = crc32.table = new Uint32Array(256);
+    for(let i=0;i<256;i++){
+      let c=i;
+      for(let j=0;j<8;j++){
+        c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+      }
+      table[i]=c >>> 0;
+    }
+  }
+  let crc = 0xFFFFFFFF;
+  for(let i=0;i<buf.length;i++){
+    crc = table[(crc ^ buf[i]) & 0xFF] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+/* ---------- OTA logic (file → BLE chunks) ---------- */
+
+let otaAbort = false;
+
+async function startOTA(){
+  const fileInput = document.getElementById('fileInput');
+  if(!fileInput.files || fileInput.files.length === 0){ setOta('Select .bin first'); return; }
+  if(!writeChar){ setOta('Not connected to ESP32'); return; }
+
+  const file = fileInput.files[0];
+  const size = file.size;
+  setOta(`Computing CRC and starting OTA: ${file.name} (${size} bytes)`);
+  bar.style.width = '0%';
+  otaAbort = false;
+
+  // compute CRC32 first (reads file fully)
+  const arrayBuffer = await file.arrayBuffer();
+  const fileBytes = new Uint8Array(arrayBuffer);
+  const crc = crc32(fileBytes);
+  console.log('CRC32 =', crc.toString(16));
+
+  try{
+    // 1) send START command with file size + crc: "OTA_START\n<size>\n<crc32>\n"
+    const header = `OTA_START\n${size}\n${crc}\n`;
+    await writeChar.writeValueWithoutResponse(new TextEncoder().encode(header));
+
+    // small delay to let ESP32 prepare
+    await new Promise(r=>setTimeout(r, 200));
+
+    // 2) stream file in chunks (max ~180 bytes per BLE write to be safe)
+    const chunkSize = 180;
+    let bytesSent = 0;
+
+    for(let offset=0; offset<fileBytes.length; offset+=chunkSize){
+      if(otaAbort) throw new Error('OTA cancelled');
+      const slice = fileBytes.subarray(offset, Math.min(fileBytes.length, offset+chunkSize));
+      await writeChar.writeValueWithoutResponse(slice);
+      bytesSent += slice.length;
+      bar.style.width = `${Math.round(bytesSent/size*100)}%`;
+    }
+
+    // 3) send end marker
+    await writeChar.writeValueWithoutResponse(new TextEncoder().encode('OTA_END\n'));
+    setOta('OTA transfer complete — waiting for verification...');
+    // Optionally wait some time, or implement status notify char if ESP32 supports it
+  }catch(e){
+    setOta('OTA failed: ' + e);
+  }
+}
+
+function cancelOTA(){
+  otaAbort = true;
+  setOta('OTA canceled');
+  bar.style.width = '0%';
 }
 </script>
 </body>
