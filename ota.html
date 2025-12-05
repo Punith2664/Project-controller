@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OTA Controls</title>
+</head>
+<body>
+  <h1>OTA Controls</h1>
+
+  <button id="connect">Connect to Car BLE</button>
+  <p id="status">Not connected</p>
+
+  <button id="start" disabled>Start OTA</button>
+  <button id="cancel" disabled>Cancel OTA</button>
+
+  <script>
+    const SERVICE_UUID = '0000abcd-0000-1000-8000-00805f9b34fb';
+    const CHAR_UUID_WRITE = '0000dcba-0000-1000-8000-00805f9b34fb';
+
+    let writeChar;
+
+    document.getElementById('connect').onclick = async () => {
+      try {
+        const device = await navigator.bluetooth.requestDevice({
+          filters: [{ name: 'My_STM32_Car_BLE' }],
+          optionalServices: [SERVICE_UUID]
+        });
+
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        writeChar = await service.getCharacteristic(CHAR_UUID_WRITE);
+
+        document.getElementById('status').innerText = "Connected";
+        document.getElementById('start').disabled = false;
+        document.getElementById('cancel').disabled = false;
+
+      } catch (e) {
+        console.log(e);
+        alert("BLE connection failed");
+      }
+    };
+
+    async function send(ch) {
+      if (!writeChar) return alert("Connect first!");
+      await writeChar.writeValue(new Uint8Array([ch.charCodeAt(0)]));
+    }
+
+    document.getElementById('start').onclick = () => send('3');
+    document.getElementById('cancel').onclick = () => send('4');
+  </script>
+</body>
+</html>
