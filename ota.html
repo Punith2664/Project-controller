@@ -1,52 +1,352 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>OTA Controls</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>OTA Controls — Project Controller</title>
+
+  <style>
+    :root{
+      --bg:#07121a;
+      --card: rgba(255,255,255,0.02);
+      --muted:#9aa7b2;
+      --accent:#22c55e;
+      --accent-2:#06b6d4;
+      --glass: rgba(255,255,255,0.03);
+      --radius:12px;
+    }
+
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:Inter, Arial, sans-serif;
+      background:linear-gradient(180deg,#06111a 0%, #07121a 60%), var(--bg);
+      color:#e6eef3;
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:28px;
+    }
+
+    .container{
+      width:100%;
+      max-width:980px;
+      display:grid;
+      grid-template-columns: 1fr 380px;
+      gap:20px;
+    }
+
+    .card{
+      background:var(--card);
+      border-radius:var(--radius);
+      padding:18px;
+      border:1px solid rgba(255,255,255,0.03);
+      box-shadow: 0 8px 28px rgba(0,0,0,0.6);
+    }
+
+    header{
+      display:flex;align-items:center;gap:12px;margin-bottom:8px;
+    }
+    .logo{
+      width:48px;height:48px;border-radius:10px;background:linear-gradient(135deg,var(--accent-2),var(--accent));
+      display:flex;align-items:center;justify-content:center;color:#042;font-weight:800;
+    }
+    h1{margin:0;font-size:18px}
+    p.lead{margin:6px 0 0;color:var(--muted);font-size:13px}
+
+    .controls{display:flex;flex-direction:column;gap:12px}
+    .row{display:flex;gap:10px;align-items:center}
+
+    button{
+      border:0;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer;
+      background:#0b1220;color:#e6eef3;
+    }
+    button.primary{
+      background:linear-gradient(90deg,var(--accent-2),#1fb2c9); color:#022;
+    }
+    button.positive{background:linear-gradient(90deg,var(--accent),#16a34a); color:#042;}
+    button.warn{background:linear-gradient(90deg,#f97316,#f59e0b); color:#08111a;}
+    button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)}
+
+    .status{
+      display:flex;gap:10px;align-items:center;font-size:13px;color:var(--muted)
+    }
+    .dot{width:11px;height:11px;border-radius:50%;background:#6b7280;display:inline-block}
+
+    .progress{
+      height:12px;background:#07121a;border-radius:8px;margin-top:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.03);
+    }
+    .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),#16a34a);transition:width .3s ease}
+
+    /* logs */
+    .logs{
+      height:300px;overflow:auto;background:rgba(0,0,0,0.25);padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.02);
+      font-family:monospace;font-size:13px;color:#dceef2;
+    }
+    .log-line{margin:6px 0;padding:6px;border-radius:6px;background:rgba(255,255,255,0.01);}
+
+    aside .card{position:sticky; top:28px}
+
+    @media(max-width:980px){
+      .container{grid-template-columns:1fr; padding:8px}
+      aside .card{position:static}
+    }
+  </style>
 </head>
 <body>
-  <h1>OTA Controls</h1>
+  <div class="container">
 
-  <button id="connect">Connect to Car BLE</button>
-  <p id="status">Not connected</p>
+    <!-- MAIN OTA PANEL -->
+    <main class="card">
+      <header>
+        <div class="logo">OTA</div>
+        <div>
+          <h1>OTA Controls</h1>
+          <p class="lead">Start or cancel OTA on the car. Connect to the ESP32 BLE bridge below.</p>
+        </div>
+      </header>
 
-  <button id="start" disabled>Start OTA</button>
-  <button id="cancel" disabled>Cancel OTA</button>
+      <div class="controls">
+        <div class="row">
+          <button id="connectBtn" class="primary">🔵 Connect BLE</button>
+          <div class="status">
+            <span class="dot" id="statusDot"></span>
+            <span id="statusText">Not connected</span>
+          </div>
+        </div>
+
+        <div class="row">
+          <button id="startBtn" class="positive" disabled>🚀 Start OTA</button>
+          <button id="cancelBtn" class="warn" disabled>✖ Cancel OTA</button>
+          <button id="sendRawBtn" class="ghost" title="Send custom command (prompt)">Send Raw</button>
+        </div>
+
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="color:var(--muted);font-size:13px">OTA Progress</div>
+            <div id="progressPct" style="font-weight:700">0%</div>
+          </div>
+          <div class="progress" aria-hidden="true">
+            <div class="bar" id="progressBar"></div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px;color:var(--muted);font-size:13px">
+          Logs (from device notifications)
+        </div>
+
+        <div class="logs" id="logs"></div>
+
+      </div>
+    </main>
+
+    <!-- SIDE: Info & hints -->
+    <aside>
+      <div class="card">
+        <h3 style="margin:0 0 8px">Connection Info</h3>
+        <p style="margin:0;color:var(--muted)">Service UUID:</p>
+        <code style="display:block;margin:8px 0 14px;background:#07121a;padding:8px;border-radius:6px;color:#cde7e9">0000abcd-0000-1000-8000-00805f9b34fb</code>
+
+        <p style="margin:0;color:var(--muted)">Write Characteristic:</p>
+        <code style="display:block;margin:8px 0 14px;background:#07121a;padding:8px;border-radius:6px;color:#cde7e9">0000dcba-0000-1000-8000-00805f9b34fb</code>
+
+        <p style="margin-top:8px;color:var(--muted);font-size:13px">This page will try to enable notifications on any characteristic that supports <code>notify</code>. If your ESP32 exposes a notify characteristic (recommended), OTA progress messages from STM32 can be shown here.</p>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <h3 style="margin:0 0 8px">Tips</h3>
+        <ul style="margin:0;padding-left:18px;color:var(--muted);font-size:13px;line-height:1.55">
+          <li>Use <strong>Start OTA</strong> to send ASCII <code>'3'</code>.</li>
+          <li>Use <strong>Cancel OTA</strong> to send ASCII <code>'4'</code>.</li>
+          <li>If you want logs, implement an ESP32 notify characteristic that forwards STM32 UART logs to BLE.</li>
+        </ul>
+      </div>
+    </aside>
+
+  </div>
 
   <script>
+    // Keep these UUIDs in sync with your ESP32 firmware
     const SERVICE_UUID = '0000abcd-0000-1000-8000-00805f9b34fb';
-    const CHAR_UUID_WRITE = '0000dcba-0000-1000-8000-00805f9b34fb';
+    const WRITE_CHAR_UUID = '0000dcba-0000-1000-8000-00805f9b34fb';
 
-    let writeChar;
+    // UI elements
+    const connectBtn = document.getElementById('connectBtn');
+    const startBtn = document.getElementById('startBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const sendRawBtn = document.getElementById('sendRawBtn');
 
-    document.getElementById('connect').onclick = async () => {
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const logsEl = document.getElementById('logs');
+    const progressBar = document.getElementById('progressBar');
+    const progressPct = document.getElementById('progressPct');
+
+    let deviceRef = null;
+    let writeChar = null;
+    let notifyChar = null;
+    let serverRef = null;
+
+    function setConnected(connected){
+      if(connected){
+        statusDot.style.background = '#16a34a';
+        statusText.textContent = 'Connected';
+        startBtn.disabled = false;
+        cancelBtn.disabled = false;
+      } else {
+        statusDot.style.background = '#6b7280';
+        statusText.textContent = 'Not connected';
+        startBtn.disabled = true;
+        cancelBtn.disabled = true;
+        writeChar = null;
+        notifyChar = null;
+      }
+    }
+
+    function appendLog(text, cls){
+      const el = document.createElement('div');
+      el.className = 'log-line';
+      el.textContent = '[' + new Date().toLocaleTimeString() + '] ' + text;
+      logsEl.appendChild(el);
+      logsEl.scrollTop = logsEl.scrollHeight;
+    }
+
+    function setProgress(pct){
+      pct = Math.max(0, Math.min(100, pct));
+      progressBar.style.width = pct + '%';
+      progressPct.textContent = pct + '%';
+    }
+
+    async function connectBLE(){
       try {
+        connectBtn.disabled = true;
+        connectBtn.textContent = 'Connecting…';
+
         const device = await navigator.bluetooth.requestDevice({
           filters: [{ name: 'My_STM32_Car_BLE' }],
           optionalServices: [SERVICE_UUID]
         });
 
+        deviceRef = device;
+        deviceRef.addEventListener('gattserverdisconnected', onDisconnected);
+
         const server = await device.gatt.connect();
+        serverRef = server;
         const service = await server.getPrimaryService(SERVICE_UUID);
-        writeChar = await service.getCharacteristic(CHAR_UUID_WRITE);
 
-        document.getElementById('status').innerText = "Connected";
-        document.getElementById('start').disabled = false;
-        document.getElementById('cancel').disabled = false;
+        // Try to get write characteristic by UUID
+        try {
+          writeChar = await service.getCharacteristic(WRITE_CHAR_UUID);
+        } catch (e) {
+          console.warn('Write char not found by UUID:', e);
+          // fallback: find a writable characteristic
+          const chars = await service.getCharacteristics();
+          for (const c of chars) {
+            const props = c.properties;
+            if (props.write || props.writeWithoutResponse) {
+              writeChar = c;
+              console.log('Using writable characteristic', c.uuid);
+              break;
+            }
+          }
+        }
 
-      } catch (e) {
-        console.log(e);
-        alert("BLE connection failed");
+        // Try to find a notify characteristic (any)
+        try {
+          const chars = await service.getCharacteristics();
+          for (const c of chars){
+            if (c.properties.notify) {
+              notifyChar = c;
+              break;
+            }
+          }
+        } catch(e){
+          console.warn('Error enumerating characteristics for notify', e);
+        }
+
+        if (notifyChar) {
+          await notifyChar.startNotifications();
+          notifyChar.addEventListener('characteristicvaluechanged', handleNotify);
+          appendLog('Notifications enabled (from ' + notifyChar.uuid + ')');
+        } else {
+          appendLog('No notify characteristic found (notifications disabled)');
+        }
+
+        setConnected(true);
+        connectBtn.textContent = 'Connected';
+      } catch (err) {
+        console.error(err);
+        alert('BLE connect failed: ' + (err && err.message ? err.message : err));
+        connectBtn.disabled = false;
+        connectBtn.textContent = '🔵 Connect BLE';
+        setConnected(false);
       }
-    };
-
-    async function send(ch) {
-      if (!writeChar) return alert("Connect first!");
-      await writeChar.writeValue(new Uint8Array([ch.charCodeAt(0)]));
     }
 
-    document.getElementById('start').onclick = () => send('3');
-    document.getElementById('cancel').onclick = () => send('4');
+    function onDisconnected(){
+      appendLog('Device disconnected');
+      setConnected(false);
+      connectBtn.disabled = false;
+      connectBtn.textContent = '🔵 Connect BLE';
+    }
+
+    function handleNotify(ev){
+      const value = ev.target.value; // DataView
+      // Convert bytes to string (printable ASCII)
+      const arr = new Uint8Array(value.buffer);
+      let s = '';
+      for (let i=0; i<arr.length; ++i){
+        s += String.fromCharCode(arr[i]);
+      }
+      appendLog('NOTIFY: ' + s);
+
+      // If notify message contains progress like "PROG:45" or "P:45" parse it
+      const m = s.match(/(?:PROG|P|PROGRESS)[:=]?\s*([0-9]{1,3})/i);
+      if (m && m[1]) {
+        const pct = parseInt(m[1], 10);
+        setProgress(pct);
+      }
+    }
+
+    async function writeCharSend(ch){
+      if (!writeChar) {
+        alert('No write characteristic available — connect first');
+        return;
+      }
+      try {
+        const data = new Uint8Array([ch.charCodeAt(0)]);
+        await writeChar.writeValue(data);
+        appendLog('WROTE: ' + ch);
+      } catch (e) {
+        console.error('Write failed', e);
+        appendLog('Write failed: ' + (e && e.message ? e.message : e));
+      }
+    }
+
+    // Buttons
+    connectBtn.addEventListener('click', connectBLE);
+    startBtn.addEventListener('click', () => { writeCharSend('3'); setProgress(1); });
+    cancelBtn.addEventListener('click', () => { writeCharSend('4'); setProgress(0); });
+
+    sendRawBtn.addEventListener('click', async () => {
+      const v = prompt('Send raw ASCII command (single character or text):');
+      if (!v) return;
+      // if text longer than 1 char send as bytes
+      if (!writeChar) return alert('Connect first');
+      const payload = new Uint8Array(Array.from(v).map(c => c.charCodeAt(0)));
+      try {
+        await writeChar.writeValue(payload);
+        appendLog('WROTE RAW: ' + v);
+      } catch (e) {
+        appendLog('Write failed: ' + (e && e.message ? e.message : e));
+      }
+    });
+
+    // initialize UI
+    setConnected(false);
+    setProgress(0);
+    appendLog('OTA UI ready');
   </script>
 </body>
 </html>
