@@ -94,6 +94,12 @@
       color:#042;font-weight:800;text-decoration:none;
     }
 
+    .btn.ghost{
+      background:transparent;
+      border:1px solid rgba(255,255,255,0.05);
+      color:var(--muted);
+    }
+
     @media(max-width:880px){
       .wrap{grid-template-columns:1fr;}
       .logo{display:none}
@@ -122,6 +128,7 @@
         </div>
       </div>
 
+      <!-- DRIVE CONTROLS -->
       <div class="card">
         <h3 style="margin:0 0 8px">Drive Controls</h3>
         <div class="controls">
@@ -133,20 +140,35 @@
         </div>
       </div>
 
-      <div class="card">
+      <!-- ⭐ MODE SELECTION (AUTO / REMOTE / IDLE) -->
+      <div class="card" style="margin-top:16px">
+        <h3 style="margin:0 0 8px">Mode Selection</h3>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap">
+          <button class="btn ghost" onclick="sendCommand('1')">AUTO</button>
+          <button class="btn ghost" onclick="sendCommand('0')">IDLE</button>
+          <button class="btn ghost" onclick="sendCommand('2')">REMOTE</button>
+        </div>
+
+        <p style="margin:10px 0 0; color:var(--muted); font-size:13px">
+          AUTO → <b>1</b> &nbsp;&nbsp; IDLE → <b>0</b> &nbsp;&nbsp; REMOTE → <b>2</b>
+        </p>
+      </div>
+
+      <!-- OTA SECTION -->
+      <div class="card" style="margin-top:18px">
         <h3 style="margin:0 0 8px">OTA Update</h3>
         <p style="margin:0 0 10px;color:var(--muted);font-size:13px">
-          For firmware flashing and update commands.
+          Open OTA page to perform firmware updates.
         </p>
 
-        <!-- OTA BUTTON (NEW PAGE) -->
         <div class="ota">
           <a href="ota.html" target="_blank">Open OTA Page</a>
         </div>
       </div>
     </section>
 
-    <!-- INFORMATION -->
+    <!-- SIDE INFO -->
     <aside class="card">
       <h3>Info</h3>
       <p>Service UUID:<br><code>0000abcd-0000-1000-8000-00805f9b34fb</code></p>
@@ -179,9 +201,9 @@
       }
     };
 
-    async function sendCommand(char) {
+    async function sendCommand(ch) {
       if (!writeChar) return alert("Connect first!");
-      await writeChar.writeValue(new Uint8Array([char.charCodeAt(0)]));
+      await writeChar.writeValue(new Uint8Array([ch.charCodeAt(0)]));
     }
   </script>
 
