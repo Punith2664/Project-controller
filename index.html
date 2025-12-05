@@ -8,13 +8,13 @@
   <style>
     :root{
       --bg:#0f1720;
-      --card:#0f1728;
       --muted:#9aa7b2;
       --accent:#22c55e;
       --accent-2:#06b6d4;
       --glass: rgba(255,255,255,0.03);
       --glass-2: rgba(255,255,255,0.025);
       --radius:14px;
+      --card-pad:18px;
     }
 
     *{box-sizing:border-box}
@@ -78,13 +78,15 @@
     .control-btn{
       padding:14px;border-radius:12px;background:#0b1220;
       color:#e8f8f5;font-size:16px;font-weight:700;border:1px solid rgba(255,255,255,0.04);
+      display:flex;align-items:center;justify-content:center;
+      height:54px;
     }
 
     .wide{grid-column:1/-1}
 
     .card{
       background:rgba(255,255,255,0.02);
-      border-radius:12px;padding:18px;
+      border-radius:12px;padding:var(--card-pad);
       border:1px solid rgba(255,255,255,0.04);
     }
 
@@ -98,11 +100,47 @@
       background:transparent;
       border:1px solid rgba(255,255,255,0.05);
       color:var(--muted);
+      padding:8px 12px;
+      border-radius:10px;
+      font-weight:700;
     }
+
+    /* Joystick visuals */
+    .joystick-wrap{
+      display:flex;
+      gap:14px;
+      align-items:center;
+      justify-content:center;
+      padding-top:6px;
+    }
+    .joystick{
+      width:160px;height:160px;border-radius:50%;
+      background: linear-gradient(180deg, rgba(255,255,255,0.012), rgba(255,255,255,0.008));
+      border: 1px solid rgba(255,255,255,0.03);
+      position:relative;
+      touch-action:none;
+      box-shadow: inset 0 6px 18px rgba(0,0,0,0.5);
+    }
+    .joy-base{
+      position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:110px;height:110px;border-radius:50%;
+      background: rgba(255,255,255,0.01); display:flex;align-items:center;justify-content:center;
+      border:1px solid rgba(255,255,255,0.02);
+    }
+    .joy-knob{
+      width:48px;height:48px;border-radius:50%;
+      background:linear-gradient(180deg,#dceef2,#a7f3d0);
+      box-shadow: 0 8px 22px rgba(0,0,0,0.55);
+      transform: translate(-50%,-50%);
+      position:absolute; left:50%; top:50%;
+      transition: transform 0.04s linear;
+    }
+    .joy-hint{font-size:12px;color:var(--muted);text-align:center;margin-top:6px}
 
     @media(max-width:880px){
       .wrap{grid-template-columns:1fr;}
       .logo{display:none}
+      .joystick{width:140px;height:140px}
+      .joy-base{width:96px;height:96px}
     }
   </style>
 </head>
@@ -131,23 +169,32 @@
       <!-- DRIVE CONTROLS -->
       <div class="card">
         <h3 style="margin:0 0 8px">Drive Controls</h3>
-        <div class="controls">
-          <button class="control-btn" onclick="sendCommand('F')">⬆️</button>
-          <button class="control-btn" onclick="sendCommand('L')">⬅️</button>
-          <button class="control-btn" onclick="sendCommand('R')">➡️</button>
-          <button class="control-btn wide" onclick="sendCommand('S')">⏸ Stop</button>
-          <button class="control-btn" onclick="sendCommand('B')">⬇️</button>
+
+        <!-- joystick + buttons layout -->
+        <div class="joystick-wrap">
+          <div class="joystick" id="joystick" role="application" aria-label="Directional joystick">
+            <div class="joy-base"></div>
+            <div class="joy-knob" id="joyKnob" ></div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <button class="control-btn" onclick="sendCommand('F')" title="Forward">⬆️</button>
+            <button class="control-btn" onclick="sendCommand('S')" title="Stop">⏸ Stop</button>
+            <button class="control-btn" onclick="sendCommand('B')" title="Backward">⬇️</button>
+          </div>
         </div>
+
+        <div class="joy-hint">Drag the joystick to control direction. Release to stop.</div>
       </div>
 
-      <!-- ⭐ MODE SELECTION (AUTO / REMOTE / IDLE) -->
+      <!-- MODE SELECTION -->
       <div class="card" style="margin-top:16px">
         <h3 style="margin:0 0 8px">Mode Selection</h3>
 
         <div style="display:flex; gap:10px; flex-wrap:wrap">
-          <button class="btn ghost" onclick="sendCommand('1')">AUTO</button>
-          <button class="btn ghost" onclick="sendCommand('0')">IDLE</button>
-          <button class="btn ghost" onclick="sendCommand('2')">REMOTE</button>
+          <button class="btn ghost" id="btnAuto" onclick="setMode('1')">AUTO</button>
+          <button class="btn ghost" id="btnIdle" onclick="setMode('0')">IDLE</button>
+          <button class="btn ghost" id="btnRemote" onclick="setMode('2')">REMOTE</button>
         </div>
 
         <p style="margin:10px 0 0; color:var(--muted); font-size:13px">
@@ -178,34 +225,193 @@
   </div>
 
   <script>
+    /* ========== BLE setup (unchanged) ========== */
     const SERVICE_UUID = "0000abcd-0000-1000-8000-00805f9b34fb";
     const CHAR_UUID_WRITE = "0000dcba-0000-1000-8000-00805f9b34fb";
 
     let writeChar = null;
+    let deviceRef = null;
 
-    document.getElementById("connectBtn").onclick = async () => {
+    const connectBtn = document.getElementById('connectBtn');
+    const statusText = document.getElementById('statusText');
+    const statusDot = document.getElementById('statusDot');
+
+    function setConnected(connected){
+      statusText.innerText = connected ? 'Connected' : 'Not Connected';
+      statusDot.style.background = connected ? '#22c55e' : '#6b7280';
+      connectBtn.disabled = connected;
+    }
+
+    connectBtn.addEventListener('click', async () => {
       try {
         const device = await navigator.bluetooth.requestDevice({
           filters: [{ name: "My_STM32_Car_BLE" }],
           optionalServices: [SERVICE_UUID],
+        });
+        deviceRef = device;
+        deviceRef.addEventListener('gattserverdisconnected', () => {
+          writeChar = null;
+          setConnected(false);
+          connectBtn.disabled = false;
         });
 
         const server = await device.gatt.connect();
         const service = await server.getPrimaryService(SERVICE_UUID);
         writeChar = await service.getCharacteristic(CHAR_UUID_WRITE);
 
-        document.getElementById("statusText").innerText = "Connected";
-        document.getElementById("statusDot").style.background = "#22c55e";
+        setConnected(true);
       } catch (e) {
-        alert("BLE connection failed");
+        console.error('BLE connect failed', e);
+        alert('BLE connection failed: ' + (e && e.message ? e.message : e));
       }
-    };
+    });
 
-    async function sendCommand(ch) {
-      if (!writeChar) return alert("Connect first!");
-      await writeChar.writeValue(new Uint8Array([ch.charCodeAt(0)]));
+    async function sendCommand(ch){
+      if (!writeChar) return alert('Connect first!');
+      try {
+        // single ASCII byte
+        await writeChar.writeValue(new Uint8Array([ch.charCodeAt(0)]));
+      } catch (e) {
+        console.error('Write failed', e);
+      }
     }
-  </script>
 
+    /* ========== MODE BUTTON logic (visual active state + send) ========== */
+    function clearModeActive(){
+      document.getElementById('btnAuto').classList.remove('active');
+      document.getElementById('btnIdle').classList.remove('active');
+      document.getElementById('btnRemote').classList.remove('active');
+    }
+
+    function setMode(ch){
+      // visual: toggle active styling
+      clearModeActive();
+      if (ch === '1') document.getElementById('btnAuto').classList.add('active');
+      else if (ch === '0') document.getElementById('btnIdle').classList.add('active');
+      else if (ch === '2') document.getElementById('btnRemote').classList.add('active');
+
+      // send to device
+      sendCommand(ch);
+    }
+
+    // small CSS injection to show which mode is active
+    const css = `.btn.ghost.active{ box-shadow: 0 8px 24px rgba(34,197,94,0.08); border-color: rgba(34,197,94,0.4); color: #a7f3d0; }`;
+    const s = document.createElement('style'); s.appendChild(document.createTextNode(css)); document.head.appendChild(s);
+
+    /* ========== Joystick implementation ========== */
+    const joystick = document.getElementById('joystick');
+    const knob = document.getElementById('joyKnob');
+
+    let joyActive = false;
+    let joyCenter = { x: 0, y: 0 };
+    let joyMaxRadius = 48;          // knob max movement radius
+    let repeatInterval = null;
+    let currentDirection = null;    // 'F','B','L','R' or null
+
+    // utility: get pointer position (mouse or touch)
+    function getPointerPos(ev){
+      if (ev.touches && ev.touches.length) {
+        return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+      } else {
+        return { x: ev.clientX, y: ev.clientY };
+      }
+    }
+
+    function startJoystick(ev){
+      ev.preventDefault();
+      const rect = joystick.getBoundingClientRect();
+      joyCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      joyActive = true;
+
+      // begin repeating send while active
+      if (!repeatInterval) repeatInterval = setInterval(() => {
+        if (currentDirection) sendCommand(currentDirection);
+      }, 120);
+
+      // immediately process first move
+      handleJoystickMove(ev);
+    }
+
+    function handleJoystickMove(ev){
+      if (!joyActive) return;
+      const p = getPointerPos(ev);
+      const dx = p.x - joyCenter.x;
+      const dy = joyCenter.y - p.y; // invert Y so up is positive
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      const max = joyMaxRadius;
+      const clamped = Math.min(dist, max);
+      // move knob position proportionally
+      const nx = (dx / (dist || 1)) * clamped;
+      const ny = ( -dy / (dist || 1)) * clamped; // Note: CSS y axis is positive down; we'll set transform accordingly
+      // CSS translate: move by dx, dy but note inversion of sign for Y
+      knob.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${- (dy / (dist || 1)) * clamped}px))`;
+
+      // compute angle and sector
+      const angle = Math.atan2(dy, dx) * 180 / Math.PI; // degrees, up positive
+      let dir = null;
+      // sectors:
+      // right: -45 < angle <= 45
+      // up: 45 < angle <= 135
+      // left: (angle > 135 or angle <= -135)
+      // down: -135 < angle <= -45
+      if (angle > -45 && angle <= 45) dir = 'R';
+      else if (angle > 45 && angle <= 135) dir = 'F';
+      else if (angle > 135 || angle <= -135) dir = 'L';
+      else if (angle > -135 && angle <= -45) dir = 'B';
+
+      // set currentDirection only if distance passes deadzone
+      const deadzone = 12; // pixels
+      if (dist < deadzone) dir = null;
+
+      // update currentDirection and optionally send immediately
+      if (dir !== currentDirection){
+        currentDirection = dir;
+        if (currentDirection) {
+          sendCommand(currentDirection);
+        } else {
+          // if leaving to deadzone, send STOP
+          sendCommand('S');
+        }
+      }
+    }
+
+    function endJoystick(){
+      joyActive = false;
+      // reset knob to center
+      knob.style.transform = `translate(-50%,-50%)`;
+      if (repeatInterval){ clearInterval(repeatInterval); repeatInterval = null; }
+      currentDirection = null;
+      // send stop
+      sendCommand('S');
+    }
+
+    // pointer events
+    joystick.addEventListener('pointerdown', (e) => { joystick.setPointerCapture(e.pointerId); startJoystick(e); });
+    window.addEventListener('pointermove', handleJoystickMove);
+    window.addEventListener('pointerup', (e) => { try{ joystick.releasePointerCapture(e.pointerId); }catch(e){} endJoystick(); });
+
+    // also support touchstart/move/end fallback (most browsers support pointer events but keep for safety)
+    joystick.addEventListener('touchstart', startJoystick, {passive:false});
+    joystick.addEventListener('touchmove', handleJoystickMove, {passive:false});
+    joystick.addEventListener('touchend', endJoystick);
+
+    /* ========== Optional: Analog mode (commented) ==========
+       If you later want to send vector data instead of single-direction chars,
+       uncomment and adapt this block. For example, send "Jx,y\n" where x,y are -100..100.
+
+    function sendAnalog(dx, dy){
+      // dx,dy in range -1..1
+      const vx = Math.round(dx * 100); // -100..100
+      const vy = Math.round(dy * 100);
+      const payload = `J${vx},${vy}\n`; // example format
+      // send as ASCII bytes:
+      const arr = new Uint8Array(payload.split('').map(c=>c.charCodeAt(0)));
+      writeChar.writeValue(arr);
+    }
+    ============================================================ */
+
+    // initialize UI state
+    setConnected(false);
+  </script>
 </body>
 </html>
