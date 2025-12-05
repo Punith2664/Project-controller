@@ -150,7 +150,7 @@
         <p style="margin:0;color:var(--muted)">Write Characteristic:</p>
         <code style="display:block;margin:8px 0 14px;background:#07121a;padding:8px;border-radius:6px;color:#cde7e9">0000dcba-0000-1000-8000-00805f9b34fb</code>
 
-        <p style="margin-top:8px;color:var(--muted);font-size:13px">Start OTA to simulate an upload sequence (10s). Cancel anytime to stop and send signal 4. <strong>Send Raw</strong> lets you pick a file and simulates uploading it.</p>
+        <p style="margin-top:8px;color:var(--muted);font-size:13px">Start OTA to simulate an upload sequence (10s). Cancel anytime to stop and send signal 4. <strong>Send Raw</strong> lets you pick a file and then you must press Start OTA to simulate its upload.</p>
       </div>
     </aside>
 
@@ -187,7 +187,11 @@
     let fakeDuration = 10000; // 10 seconds
     let fakePaused = false;
     let fakeProgress = 0; // 0..100
-    let lastLoggedStage = 0; // 0 none, 1 started, 2 uploaded, 3 writing, 4 done
+    let lastLoggedStage = 0; // 0 none, 1 uploaded, 2 writing, 3 done
+
+    // NEW: pendingFile holds the File object selected by Send Raw.
+    // If null, Start OTA will perform a generic OTA; otherwise it will simulate upload of that file.
+    let pendingFile = null;
 
     function appendLog(text){
       const el = document.createElement('div');
@@ -284,13 +288,18 @@
       fakePaused = false;
       lastLoggedStage = 0;
       setProgress(0);
-      appendLog(options.label || 'Starting OTA');
+
+      // If a file is pending, use that filename in the label.
+      const label = pendingFile ? `Starting upload of ${pendingFile.name}` : (options.label || 'Starting OTA');
+      appendLog(label);
+
       // Immediately send '3' to device (OTA start)
       writeCharSend('3');
 
       // UI enable/disable
       startBtn.disabled = true;
       cancelBtn.disabled = false;
+      sendRawBtn.disabled = true; // prevent selecting another file while running
 
       // tick every 80ms for smoothness
       fakeTimer = setInterval(() => {
@@ -317,9 +326,12 @@
           lastLoggedStage = 3;
           // send '4' (OTA cancel/finish) as requested
           writeCharSend('4');
+
           // reset UI
           startBtn.disabled = false;
           cancelBtn.disabled = true;
+          sendRawBtn.disabled = false;
+          pendingFile = null; // clear pending file after successful fake upload
         }
       }, 80);
     }
@@ -337,14 +349,21 @@
       // UI
       startBtn.disabled = false;
       cancelBtn.disabled = true;
+      sendRawBtn.disabled = false;
+      pendingFile = null; // clear pending file on cancel
     }
 
-    // Start button
+    // Start button — now respects pendingFile: if a file is selected it will upload that file,
+    // otherwise it performs the generic OTA start flow.
     startBtn.addEventListener('click', () => {
-      // if already running, ignore
-      if (fakeTimer) return;
-      // start fake progress 10s; log "Starting OTA" handled by startFakeProgress
-      startFakeProgress({ duration: 10000, label: 'Starting OTA' });
+      if (fakeTimer) return; // already running
+      if (pendingFile) {
+        // user selected a file earlier — start its fake upload
+        startFakeProgress({ duration: 10000, label: 'Starting upload of ' + pendingFile.name });
+      } else {
+        // normal OTA (no file selected)
+        startFakeProgress({ duration: 10000, label: 'Starting OTA' });
+      }
     });
 
     // Cancel button
@@ -352,9 +371,10 @@
       stopFakeProgressAndSendCancel();
     });
 
-    /* ----------------- Send Raw (file picker + fake upload) ----------------- */
+    /* ----------------- Send Raw (file picker + delayed fake upload) ----------------- */
 
     sendRawBtn.addEventListener('click', () => {
+      // open file picker; selection will only set pendingFile
       filePicker.value = ''; // clear previous
       filePicker.click();
     });
@@ -362,13 +382,12 @@
     filePicker.addEventListener('change', (ev) => {
       const f = ev.target.files && ev.target.files[0];
       if (!f) return;
+      // Do NOT start upload immediately. Just save file and let user press Start OTA.
+      pendingFile = f;
       appendLog('Selected file: ' + f.name + ' (' + Math.round(f.size/1024) + ' KB)');
-      // Fake upload same as Start OTA, but label includes filename
-      if (fakeTimer) {
-        appendLog('An upload is already running. Please cancel or wait.');
-        return;
-      }
-      startFakeProgress({ duration: 10000, label: 'Starting upload of ' + f.name });
+      appendLog('Press Start OTA to simulate uploading the selected file.');
+      // Optionally, enable the Start button (it already is enabled by default)
+      // startBtn.disabled = false;
     });
 
     /* ----------------- Initialize UI ----------------- */
