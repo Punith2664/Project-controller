@@ -77,7 +77,7 @@
     .progress{
       height:12px;background:#07121a;border-radius:8px;margin-top:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.03);
     }
-    .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),#16a34a);transition:width .3s ease}
+    .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),#16a34a);transition:width .12s linear}
 
     /* logs */
     .logs{
@@ -103,7 +103,7 @@
         <div class="logo">OTA</div>
         <div>
           <h1>OTA Controls</h1>
-          <p class="lead">Start or cancel OTA on the car. Connect to the ESP32 BLE bridge below.</p>
+          <p class="lead">Start or cancel OTA on the car. This page fakes upload progress locally and still sends signals to the ESP32 when connected.</p>
         </div>
       </header>
 
@@ -117,9 +117,9 @@
         </div>
 
         <div class="row">
-          <button id="startBtn" class="positive" disabled>🚀 Start OTA</button>
+          <button id="startBtn" class="positive">🚀 Start OTA</button>
           <button id="cancelBtn" class="warn" disabled>✖ Cancel OTA</button>
-          <button id="sendRawBtn" class="ghost" title="Send custom command (prompt)">Send Raw</button>
+          <button id="sendRawBtn" class="ghost">Send Raw (select file)</button>
         </div>
 
         <div>
@@ -133,11 +133,10 @@
         </div>
 
         <div style="margin-top:12px;color:var(--muted);font-size:13px">
-          Logs (from device notifications)
+          Logs (simulated)
         </div>
 
         <div class="logs" id="logs"></div>
-
       </div>
     </main>
 
@@ -151,20 +150,14 @@
         <p style="margin:0;color:var(--muted)">Write Characteristic:</p>
         <code style="display:block;margin:8px 0 14px;background:#07121a;padding:8px;border-radius:6px;color:#cde7e9">0000dcba-0000-1000-8000-00805f9b34fb</code>
 
-        <p style="margin-top:8px;color:var(--muted);font-size:13px">This page will try to enable notifications on any characteristic that supports <code>notify</code>. If your ESP32 exposes a notify characteristic (recommended), OTA progress messages from STM32 can be shown here.</p>
-      </div>
-
-      <div class="card" style="margin-top:14px">
-        <h3 style="margin:0 0 8px">Tips</h3>
-        <ul style="margin:0;padding-left:18px;color:var(--muted);font-size:13px;line-height:1.55">
-          <li>Use <strong>Start OTA</strong> to send ASCII <code>'3'</code>.</li>
-          <li>Use <strong>Cancel OTA</strong> to send ASCII <code>'4'</code>.</li>
-          <li>If you want logs, implement an ESP32 notify characteristic that forwards STM32 UART logs to BLE.</li>
-        </ul>
+        <p style="margin-top:8px;color:var(--muted);font-size:13px">Start OTA to simulate an upload sequence (10s). Cancel anytime to stop and send signal 4. <strong>Send Raw</strong> lets you pick a file and simulates uploading it.</p>
       </div>
     </aside>
 
   </div>
+
+  <!-- Hidden file input for Send Raw -->
+  <input type="file" id="filePicker" style="display:none" />
 
   <script>
     // Keep these UUIDs in sync with your ESP32 firmware
@@ -182,29 +175,21 @@
     const logsEl = document.getElementById('logs');
     const progressBar = document.getElementById('progressBar');
     const progressPct = document.getElementById('progressPct');
+    const filePicker = document.getElementById('filePicker');
 
     let deviceRef = null;
     let writeChar = null;
-    let notifyChar = null;
     let serverRef = null;
 
-    function setConnected(connected){
-      if(connected){
-        statusDot.style.background = '#16a34a';
-        statusText.textContent = 'Connected';
-        startBtn.disabled = false;
-        cancelBtn.disabled = false;
-      } else {
-        statusDot.style.background = '#6b7280';
-        statusText.textContent = 'Not connected';
-        startBtn.disabled = true;
-        cancelBtn.disabled = true;
-        writeChar = null;
-        notifyChar = null;
-      }
-    }
+    // Fake progress control
+    let fakeTimer = null;
+    let fakeStartTs = 0;
+    let fakeDuration = 10000; // 10 seconds
+    let fakePaused = false;
+    let fakeProgress = 0; // 0..100
+    let lastLoggedStage = 0; // 0 none, 1 started, 2 uploaded, 3 writing, 4 done
 
-    function appendLog(text, cls){
+    function appendLog(text){
       const el = document.createElement('div');
       el.className = 'log-line';
       el.textContent = '[' + new Date().toLocaleTimeString() + '] ' + text;
@@ -213,15 +198,21 @@
     }
 
     function setProgress(pct){
-      pct = Math.max(0, Math.min(100, pct));
-      progressBar.style.width = pct + '%';
-      progressPct.textContent = pct + '%';
+      fakeProgress = Math.max(0, Math.min(100, pct));
+      progressBar.style.width = fakeProgress + '%';
+      progressPct.textContent = Math.round(fakeProgress) + '%';
     }
 
-    async function connectBLE(){
+    function setConnected(connected){
+      statusDot.style.background = connected ? '#16a34a' : '#6b7280';
+      statusText.textContent = connected ? 'Connected' : 'Not connected';
+    }
+
+    // BLE connect
+    connectBtn.addEventListener('click', async () => {
       try {
         connectBtn.disabled = true;
-        connectBtn.textContent = 'Connecting…';
+        connectBtn.textContent = 'Connecting...';
 
         const device = await navigator.bluetooth.requestDevice({
           filters: [{ name: 'My_STM32_Car_BLE' }],
@@ -235,83 +226,42 @@
         serverRef = server;
         const service = await server.getPrimaryService(SERVICE_UUID);
 
-        // Try to get write characteristic by UUID
+        // Try to get write characteristic
         try {
           writeChar = await service.getCharacteristic(WRITE_CHAR_UUID);
         } catch (e) {
-          console.warn('Write char not found by UUID:', e);
-          // fallback: find a writable characteristic
+          // fallback: find writable char
           const chars = await service.getCharacteristics();
           for (const c of chars) {
-            const props = c.properties;
-            if (props.write || props.writeWithoutResponse) {
+            if (c.properties.write || c.properties.writeWithoutResponse) {
               writeChar = c;
-              console.log('Using writable characteristic', c.uuid);
               break;
             }
           }
-        }
-
-        // Try to find a notify characteristic (any)
-        try {
-          const chars = await service.getCharacteristics();
-          for (const c of chars){
-            if (c.properties.notify) {
-              notifyChar = c;
-              break;
-            }
-          }
-        } catch(e){
-          console.warn('Error enumerating characteristics for notify', e);
-        }
-
-        if (notifyChar) {
-          await notifyChar.startNotifications();
-          notifyChar.addEventListener('characteristicvaluechanged', handleNotify);
-          appendLog('Notifications enabled (from ' + notifyChar.uuid + ')');
-        } else {
-          appendLog('No notify characteristic found (notifications disabled)');
         }
 
         setConnected(true);
         connectBtn.textContent = 'Connected';
+        connectBtn.disabled = true;
       } catch (err) {
         console.error(err);
         alert('BLE connect failed: ' + (err && err.message ? err.message : err));
         connectBtn.disabled = false;
         connectBtn.textContent = '🔵 Connect BLE';
-        setConnected(false);
       }
-    }
+    });
 
     function onDisconnected(){
       appendLog('Device disconnected');
       setConnected(false);
+      writeChar = null;
       connectBtn.disabled = false;
       connectBtn.textContent = '🔵 Connect BLE';
     }
 
-    function handleNotify(ev){
-      const value = ev.target.value; // DataView
-      // Convert bytes to string (printable ASCII)
-      const arr = new Uint8Array(value.buffer);
-      let s = '';
-      for (let i=0; i<arr.length; ++i){
-        s += String.fromCharCode(arr[i]);
-      }
-      appendLog('NOTIFY: ' + s);
-
-      // If notify message contains progress like "PROG:45" or "P:45" parse it
-      const m = s.match(/(?:PROG|P|PROGRESS)[:=]?\s*([0-9]{1,3})/i);
-      if (m && m[1]) {
-        const pct = parseInt(m[1], 10);
-        setProgress(pct);
-      }
-    }
-
     async function writeCharSend(ch){
       if (!writeChar) {
-        alert('No write characteristic available — connect first');
+        appendLog('(no BLE write characteristic available — skipping write: ' + ch + ')');
         return;
       }
       try {
@@ -324,29 +274,107 @@
       }
     }
 
-    // Buttons
-    connectBtn.addEventListener('click', connectBLE);
-    startBtn.addEventListener('click', () => { writeCharSend('3'); setProgress(1); });
-    cancelBtn.addEventListener('click', () => { writeCharSend('4'); setProgress(0); });
+    /* ----------------- Fake progress implementation ----------------- */
 
-    sendRawBtn.addEventListener('click', async () => {
-      const v = prompt('Send raw ASCII command (single character or text):');
-      if (!v) return;
-      // if text longer than 1 char send as bytes
-      if (!writeChar) return alert('Connect first');
-      const payload = new Uint8Array(Array.from(v).map(c => c.charCodeAt(0)));
-      try {
-        await writeChar.writeValue(payload);
-        appendLog('WROTE RAW: ' + v);
-      } catch (e) {
-        appendLog('Write failed: ' + (e && e.message ? e.message : e));
+    function startFakeProgress(options = {}) {
+      // options: duration (ms), label (string)
+      if (fakeTimer) return; // already running
+      fakeDuration = options.duration || 10000;
+      fakeStartTs = performance.now();
+      fakePaused = false;
+      lastLoggedStage = 0;
+      setProgress(0);
+      appendLog(options.label || 'Starting OTA');
+      // Immediately send '3' to device (OTA start)
+      writeCharSend('3');
+
+      // UI enable/disable
+      startBtn.disabled = true;
+      cancelBtn.disabled = false;
+
+      // tick every 80ms for smoothness
+      fakeTimer = setInterval(() => {
+        if (fakePaused) return;
+        const elapsed = performance.now() - fakeStartTs;
+        const pct = Math.min(100, (elapsed / fakeDuration) * 100);
+        setProgress(pct);
+
+        // staged log messages
+        if (pct >= 20 && lastLoggedStage < 1) {
+          appendLog('Uploading...');
+          lastLoggedStage = 1;
+        }
+        if (pct >= 50 && lastLoggedStage < 2) {
+          appendLog('Writing bits in memory...');
+          lastLoggedStage = 2;
+        }
+
+        if (pct >= 100) {
+          // finish
+          appendLog('Upload done!');
+          clearInterval(fakeTimer);
+          fakeTimer = null;
+          lastLoggedStage = 3;
+          // send '4' (OTA cancel/finish) as requested
+          writeCharSend('4');
+          // reset UI
+          startBtn.disabled = false;
+          cancelBtn.disabled = true;
+        }
+      }, 80);
+    }
+
+    function stopFakeProgressAndSendCancel() {
+      // stop but do not reset progress
+      if (fakeTimer) {
+        clearInterval(fakeTimer);
+        fakeTimer = null;
       }
+      fakePaused = true;
+      appendLog('OTA cancelled by user');
+      // send '4'
+      writeCharSend('4');
+      // UI
+      startBtn.disabled = false;
+      cancelBtn.disabled = true;
+    }
+
+    // Start button
+    startBtn.addEventListener('click', () => {
+      // if already running, ignore
+      if (fakeTimer) return;
+      // start fake progress 10s; log "Starting OTA" handled by startFakeProgress
+      startFakeProgress({ duration: 10000, label: 'Starting OTA' });
     });
 
-    // initialize UI
+    // Cancel button
+    cancelBtn.addEventListener('click', () => {
+      stopFakeProgressAndSendCancel();
+    });
+
+    /* ----------------- Send Raw (file picker + fake upload) ----------------- */
+
+    sendRawBtn.addEventListener('click', () => {
+      filePicker.value = ''; // clear previous
+      filePicker.click();
+    });
+
+    filePicker.addEventListener('change', (ev) => {
+      const f = ev.target.files && ev.target.files[0];
+      if (!f) return;
+      appendLog('Selected file: ' + f.name + ' (' + Math.round(f.size/1024) + ' KB)');
+      // Fake upload same as Start OTA, but label includes filename
+      if (fakeTimer) {
+        appendLog('An upload is already running. Please cancel or wait.');
+        return;
+      }
+      startFakeProgress({ duration: 10000, label: 'Starting upload of ' + f.name });
+    });
+
+    /* ----------------- Initialize UI ----------------- */
     setConnected(false);
     setProgress(0);
-    appendLog('OTA UI ready');
+    appendLog('OTA UI ready (simulated). Note: progress is faked locally.');
   </script>
 </body>
 </html>
