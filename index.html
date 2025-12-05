@@ -1,486 +1,189 @@
 <!doctype html>
 <html lang="en">
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Elite DriveGuard BLE Controller + OTA</title>
-<style>
-  body{font-family:system-ui,sans-serif;margin:0;background:#0b0f14;color:#e6edf3}
-  .wrap{max-width:720px;margin:0 auto;padding:16px}
-  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
-  button{font-size:16px;padding:12px;border-radius:12px;border:0;background:#1f2937;color:#e6edf3}
-  .primary{background:#2563eb}.danger{background:#ef4444}.ok{background:#16a34a}.muted{background:#374151}
-  .card{background:#111827;padding:12px;border-radius:12px;margin:12px 0}.title{font-size:18px;margin:6px 0 12px}
-  input[type=file]{color:#fff}
-  #progress{width:100%;height:14px;background:#111827;border-radius:8px;overflow:hidden;border:1px solid #222}
-  #bar{height:100%;width:0%;background:#16a34a}
-  .status{font-size:14px;opacity:.9;margin-top:8px}
-  pre.debug{background:#000;padding:8px;border-radius:8px;max-height:160px;overflow:auto}
-</style>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Car Controller — Dashboard</title>
+
+  <style>
+    :root{
+      --bg:#0f1720;
+      --card:#0f1728;
+      --muted:#9aa7b2;
+      --accent:#22c55e;
+      --accent-2:#06b6d4;
+      --glass: rgba(255,255,255,0.03);
+      --glass-2: rgba(255,255,255,0.025);
+      --radius:14px;
+    }
+
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:Inter, Arial, sans-serif;
+      background:linear-gradient(180deg, #06111a 0%, #07121a 60%), var(--bg);
+      color:#e6eef3;
+      padding:28px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      min-height:100vh;
+    }
+
+    .wrap{
+      width:100%;
+      max-width:1080px;
+      display:grid;
+      grid-template-columns: 360px 1fr;
+      gap:22px;
+    }
+
+    .panel{
+      background:var(--glass-2);
+      border-radius:var(--radius);
+      padding:20px;
+      border:1px solid rgba(255,255,255,0.05);
+    }
+
+    header.app{display:flex;gap:12px;align-items:center;margin-bottom:16px;}
+    .logo{
+      width:52px;height:52px;border-radius:12px;
+      background:linear-gradient(135deg,var(--accent-2),var(--accent));
+      display:flex;align-items:center;justify-content:center;
+      color:#012;font-weight:700;font-size:20px;
+    }
+
+    h1{margin:0;font-size:20px}
+    p.lead{margin:4px 0 0;font-size:13px;color:var(--muted)}
+
+    .connect-row{display:flex;gap:10px;align-items:center;margin-bottom:18px;}
+    .status{
+      padding:8px 12px;border-radius:10px;background:rgba(255,255,255,0.02);
+      font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px;
+    }
+    .dot{width:10px;height:10px;border-radius:50%;background:#555}
+
+    button.btn{
+      border:0;padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer;
+    }
+    .btn.connect{background:linear-gradient(90deg,var(--accent-2),#3cc2e0);color:#012;}
+
+    .controls{
+      display:grid;
+      grid-template-columns: repeat(3,1fr);
+      gap:10px;
+      margin-top:6px;
+    }
+
+    .control-btn{
+      padding:14px;border-radius:12px;background:#0b1220;
+      color:#e8f8f5;font-size:16px;font-weight:700;border:1px solid rgba(255,255,255,0.04);
+    }
+
+    .wide{grid-column:1/-1}
+
+    .card{
+      background:rgba(255,255,255,0.02);
+      border-radius:12px;padding:18px;
+      border:1px solid rgba(255,255,255,0.04);
+    }
+
+    .ota a{
+      display:inline-block;padding:10px 14px;border-radius:12px;
+      background:linear-gradient(90deg,var(--accent),#16a34a);
+      color:#042;font-weight:800;text-decoration:none;
+    }
+
+    @media(max-width:880px){
+      .wrap{grid-template-columns:1fr;}
+      .logo{display:none}
+    }
+  </style>
+</head>
+
 <body>
-<div class="wrap">
-  <h2>Elite DriveGuard BLE Controller + OTA</h2>
+  <div class="wrap">
 
-  <div class="card">
-    <div class="row">
-      <button class="primary" onclick="connect()">Connect</button>
-      <button class="danger" onclick="disconnect()">Disconnect</button>
-    </div>
-    <div id="status" class="status">Not connected</div>
+    <!-- MAIN CONTROL PANEL -->
+    <section class="panel">
+      <header class="app">
+        <div class="logo">PC</div>
+        <div>
+          <h1>Project Controller</h1>
+          <p class="lead">BLE Controller for STM32 Car</p>
+        </div>
+      </header>
+
+      <div class="connect-row">
+        <button id="connectBtn" class="btn connect">🔵 Connect</button>
+        <div class="status">
+          <span class="dot" id="statusDot"></span>
+          <span id="statusText">Not Connected</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 8px">Drive Controls</h3>
+        <div class="controls">
+          <button class="control-btn" onclick="sendCommand('F')">⬆️</button>
+          <button class="control-btn" onclick="sendCommand('L')">⬅️</button>
+          <button class="control-btn" onclick="sendCommand('R')">➡️</button>
+          <button class="control-btn wide" onclick="sendCommand('S')">⏸ Stop</button>
+          <button class="control-btn" onclick="sendCommand('B')">⬇️</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 8px">OTA Update</h3>
+        <p style="margin:0 0 10px;color:var(--muted);font-size:13px">
+          For firmware flashing and update commands.
+        </p>
+
+        <!-- OTA BUTTON (NEW PAGE) -->
+        <div class="ota">
+          <a href="ota.html" target="_blank">Open OTA Page</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- INFORMATION -->
+    <aside class="card">
+      <h3>Info</h3>
+      <p>Service UUID:<br><code>0000abcd-0000-1000-8000-00805f9b34fb</code></p>
+      <p>Write Characteristic:<br><code>0000dcba-0000-1000-8000-00805f9b34fb</code></p>
+    </aside>
+
   </div>
 
-  <div class="card">
-    <div class="title">Modes</div>
-    <div class="row">
-      <button onclick="sendChar('0')">Idle (0)</button>
-      <button class="ok" onclick="sendChar('1')">Auto (1)</button>
-    </div>
-    <div class="row">
-      <button onclick="sendChar('2')">Remote (2)</button>
-      <button onclick="sendChar('3')">CACC (3)</button>
-    </div>
-    <div class="row">
-      <button onclick="sendChar('4')">IMA (4)</button>
-    </div>
-  </div>
+  <script>
+    const SERVICE_UUID = "0000abcd-0000-1000-8000-00805f9b34fb";
+    const CHAR_UUID_WRITE = "0000dcba-0000-1000-8000-00805f9b34fb";
 
-  <div class="card">
-    <div class="title">Remote Controls</div>
-    <div class="row">
-      <button onclick="sendChar('F')">Forward (F)</button>
-      <button onclick="sendChar('B')">Backward (B)</button>
-    </div>
-    <div class="row">
-      <button onclick="sendChar('L')">Left (L)</button>
-      <button onclick="sendChar('R')">Right (R)</button>
-    </div>
-    <button class="muted" style="width:100%" onclick="sendChar('S')">Stop (S)</button>
-  </div>
+    let writeChar = null;
 
-  <div class="card">
-    <div class="title">OTA — Upload firmware to STM32 via ESP32</div>
-    <input id="fileInput" type="file" accept=".bin" /><br/><br/>
-    <div class="row">
-      <button onclick="startOTA()" class="primary">Start OTA</button>
-      <button onclick="cancelOTA()" class="danger">Cancel OTA</button>
-    </div>
-    <div id="progress" style="margin-top:12px"><div id="bar"></div></div>
-    <div id="otastatus" class="status">No OTA in progress</div>
-    <pre id="debug" class="debug"></pre>
-  </div>
-</div>
+    document.getElementById("connectBtn").onclick = async () => {
+      try {
+        const device = await navigator.bluetooth.requestDevice({
+          filters: [{ name: "My_STM32_Car_BLE" }],
+          optionalServices: [SERVICE_UUID],
+        });
 
-<script>
-/* ---------- Configuration & constants ---------- */
-const SERVICE_UUID = '0000abcd-0000-1000-8000-00805f9b34fb';   // your BLE service
-const CHAR_UUID_WRITE = '0000dcba-0000-1000-8000-00805f9b34fb'; // write characteristic (BLE->ESP32->STM32)
-const CHAR_UUID_NOTIFY = '00001234-0000-1000-8000-00805f9b34fb'; // notify characteristic (STM32->ESP32->BLE)
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        writeChar = await service.getCharacteristic(CHAR_UUID_WRITE);
 
-const FLASH_ORIGIN = 0x08000000;     // confirmed from your linker file
-const CHUNK_SIZE = 256;              // data chunk size to write (256 is supported widely)
-const BOOT_ACK = 0x79;               // ACK from STM32 ROM bootloader
-const BOOT_NACK = 0x1F;              // NACK
-const MAX_RETRIES = 3;               // retries for handshake/chunk
-const WRITE_TIMEOUT_MS = 500;        // wait time after write for ACK
-const HANDSHAKE_WAIT_MS = 1000;      // wait up to 1s for ACK per handshake attempt
-const ERASE_WAIT_MS = 800;           // wait for erase ACK/complete
-
-/* ---------- UI elements ---------- */
-const statusEl = document.getElementById('status');
-const otaStatus = document.getElementById('otastatus');
-const bar = document.getElementById('bar');
-const debugEl = document.getElementById('debug');
-
-function logDebug(...args){ console.log(...args); debugEl.textContent += args.join(' ') + '\n'; debugEl.scrollTop = debugEl.scrollHeight; }
-function setStatus(t){ statusEl.textContent = t; }
-function setOta(t){ otaStatus.textContent = t; }
-
-/* ---------- state ---------- */
-let device, server;
-let writeChar = null;
-let notifyChar = null;
-let notifyListener = null;
-
-let otaAbort = false;
-
-/* ---------- Helpers ---------- */
-function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
-
-async function connect(){
-  try{
-    device = await navigator.bluetooth.requestDevice({
-      filters: [{ namePrefix: 'My_STM32_Car' }],
-      optionalServices: [SERVICE_UUID]
-    });
-    server = await device.gatt.connect();
-    const svc = await server.getPrimaryService(SERVICE_UUID);
-    writeChar = await svc.getCharacteristic(CHAR_UUID_WRITE);
-    notifyChar = await svc.getCharacteristic(CHAR_UUID_NOTIFY);
-    device.addEventListener('gattserverdisconnected', () => setStatus('Disconnected'));
-    setStatus('Connected to ' + (device.name || 'ESP32'));
-    logDebug('[BLE] Connected. Make sure you subscribe to notifications when prompted by OTA.');
-  }catch(e){
-    setStatus('Connect failed: ' + e);
-    logDebug('[BLE] connect error', e);
-  }
-}
-
-function disconnect(){
-  try{ if(device?.gatt?.connected) device.gatt.disconnect(); }catch(e){}
-  setStatus('Disconnected');
-}
-
-/* send single control char (existing feature) */
-async function sendChar(ch){
-  if(!writeChar){ setStatus('Not connected'); return; }
-  try{
-    await writeChar.writeValue(Uint8Array.of(ch.charCodeAt(0)));
-    console.log("Sent:", ch);
-  }catch(e){
-    setStatus('Send error: ' + e);
-  }
-}
-
-/* ---------- Notify handling ---------- */
-async function startNotify(handler){
-  if(!notifyChar) throw new Error('notifyChar missing');
-  notifyListener = (ev) => {
-    const v = ev.target.value;
-    // Copy bytes to array
-    const arr = new Uint8Array(v.buffer);
-    handler(arr);
-  };
-  await notifyChar.startNotifications();
-  notifyChar.addEventListener('characteristicvaluechanged', notifyListener);
-  logDebug('[BLE] Notifications started');
-}
-
-async function stopNotify(){
-  if(!notifyChar || !notifyListener) return;
-  notifyChar.removeEventListener('characteristicvaluechanged', notifyListener);
-  try { await notifyChar.stopNotifications(); } catch(e){}
-  notifyListener = null;
-  logDebug('[BLE] Notifications stopped');
-}
-
-/* Wait for bootloader ACK or NACK; returns 1 for ACK, 0 for NACK, -1 for timeout */
-function waitForAckOnce(timeoutMs=HANDSHAKE_WAIT_MS){
-  return new Promise((resolve) => {
-    let timer = setTimeout(() => {
-      // timeout
-      resolve(-1);
-    }, timeoutMs);
-
-    const onByte = (arr) => {
-      for(let i=0;i<arr.length;i++){
-        const b = arr[i];
-        if(b === BOOT_ACK){
-          clearTimeout(timer);
-          resolve(1);
-          return;
-        } else if(b === BOOT_NACK){
-          clearTimeout(timer);
-          resolve(0);
-          return;
-        }
+        document.getElementById("statusText").innerText = "Connected";
+        document.getElementById("statusDot").style.background = "#22c55e";
+      } catch (e) {
+        alert("BLE connection failed");
       }
-      // ignore other bytes
     };
 
-    // Temporary listener wrapper
-    const tmp = (ev) => onByte(new Uint8Array(ev.buffer));
-    if(notifyChar){
-      notifyChar.addEventListener('characteristicvaluechanged', tmp);
-      // remove listener after done
-      (async () => {
-        const result = await new Promise(res => {
-          const check = setInterval(()=>{}, 1000); // placeholder
-        });
-        // won't reach here
-      })();
-    } else {
-      resolve(-1);
+    async function sendCommand(char) {
+      if (!writeChar) return alert("Connect first!");
+      await writeChar.writeValue(new Uint8Array([char.charCodeAt(0)]));
     }
+  </script>
 
-    // Because we cannot easily remove only this temporary handler, we instead do:
-    // We'll register a general handler above in startNotify and route bytes into a queue (better).
-    // But to keep things simple and avoid complexity, we'll instead implement a small byteQueue approach below.
-  });
-}
-
-/* Better: implement a shared queue for incoming bytes from notify and a helper to wait for ack */
-let incomingQueue = [];
-function notifyHandlerPush(arr){
-  for(const b of arr) incomingQueue.push(b);
-}
-function clearIncomingQueue(){ incomingQueue = []; }
-
-/* waitForAck checks the incomingQueue for ACK/NACK within timeout */
-async function waitForAck(timeoutMs=HANDSHAKE_WAIT_MS){
-  const start = Date.now();
-  while(Date.now() - start < timeoutMs){
-    if(incomingQueue.length){
-      const b = incomingQueue.shift();
-      if(b === BOOT_ACK) return 1;
-      if(b === BOOT_NACK) return 0;
-      // otherwise ignore and continue
-    }
-    await sleep(20);
-  }
-  return -1;
-}
-
-/* Write raw bytes to the writeChar (forwarded to STM32). We use writeValue (write with response) to be reliable. */
-async function bleWriteBytes(bytes){
-  if(!writeChar) throw new Error('writeChar missing');
-  // chunk BLE writes if needed (but writeChar.writeValue accepts up to 512 typically)
-  await writeChar.writeValue(Uint8Array.from(bytes));
-  // small delay to avoid flooding
-  await sleep(20);
-}
-
-/* ---------- ROM bootloader command helpers (AN3155 style) ---------- */
-
-/* Send command byte with its complement, wait for ACK */
-async function sendCommand(cmd){
-  const cmdBytes = [cmd, (cmd ^ 0xFF) & 0xFF];
-  for(let attempt=1; attempt<=MAX_RETRIES; attempt++){
-    clearIncomingQueue();
-    await bleWriteBytes(cmdBytes);
-    const ack = await waitForAck(HANDSHAKE_WAIT_MS);
-    if(ack === 1) return true;
-    if(ack === 0) {
-      logDebug('[BOOT] NACK for cmd 0x' + cmd.toString(16));
-      // retry
-    } else {
-      logDebug('[BOOT] No reply for cmd 0x' + cmd.toString(16) + ' attempt ' + attempt);
-    }
-    await sleep(200);
-  }
-  return false;
-}
-
-/* Send WRITE MEMORY sequence: address (4 bytes) + checksum (xor of address bytes),
-   then send length-1 and data and data checksum. */
-async function writeMemoryBlock(address, dataBytes){
-  // 1) send WRITE_MEMORY command (0x31)
-  const CMD_WRITE = 0x31;
-  if(!(await sendCommand(CMD_WRITE))) return false;
-
-  // 2) send 4-byte address, MSB first? AN3155 uses big-endian address bytes (MSB first)
-  const addr = [
-    (address >> 24) & 0xFF,
-    (address >> 16) & 0xFF,
-    (address >> 8) & 0xFF,
-    (address) & 0xFF
-  ];
-  // address checksum = XOR of the 4 bytes
-  let addrXor = 0x00;
-  for(const b of addr) addrXor ^= b;
-  await bleWriteBytes([...addr, addrXor]);
-  // wait for ACK
-  let ack = await waitForAck(WRITE_TIMEOUT_MS);
-  if(ack !== 1){
-    logDebug('[BOOT] No ACK after sending address for writeMemoryBlock');
-    return false;
-  }
-
-  // 3) send N = size-1, then data bytes, then checksum (XOR of all data bytes and N)
-  const N = dataBytes.length - 1;
-  let xor = N & 0xFF;
-  for(const b of dataBytes) xor ^= b;
-  // assemble payload: [N, data..., xor]
-  await bleWriteBytes([N, ...dataBytes, xor]);
-  // wait for ACK
-  ack = await waitForAck(WRITE_TIMEOUT_MS);
-  if(ack !== 1){
-    logDebug('[BOOT] No ACK after sending data for writeMemoryBlock');
-    return false;
-  }
-  return true;
-}
-
-/* Read memory block: send READ_MEMORY cmd 0x11, send 4-byte address+xor, then send N (bytes-1) and expect response */
-async function readMemoryBlock(address, length){
-  const CMD_READ = 0x11;
-  if(!(await sendCommand(CMD_READ))) return null;
-  const addr = [
-    (address >> 24) & 0xFF,
-    (address >> 16) & 0xFF,
-    (address >> 8) & 0xFF,
-    (address) & 0xFF
-  ];
-  let addrXor=0;
-  for(const b of addr) addrXor ^= b;
-  await bleWriteBytes([...addr, addrXor]);
-  let ack = await waitForAck(WRITE_TIMEOUT_MS);
-  if(ack !== 1){ logDebug('[BOOT] No ACK after READ addr'); return null; }
-
-  // send N = length-1
-  const N = (length - 1) & 0xFF;
-  await bleWriteBytes([N, N ^ 0xFF /* some docs ask for checksum? but many bootloaders expect N only followed by complement*/
-  ]);
-  // Wait for data bytes to arrive via notifications
-  // We'll collect 'length' bytes from incomingQueue
-  const start = Date.now();
-  const timeout = 2000 + length*5; // time proportional to length
-  const data = [];
-  while(data.length < length && (Date.now() - start) < timeout){
-    if(incomingQueue.length){
-      data.push(incomingQueue.shift());
-    } else {
-      await sleep(10);
-    }
-  }
-  if(data.length !== length){
-    logDebug('[BOOT] Read memory timeout, got', data.length, 'expected', length);
-    return null;
-  }
-  return Uint8Array.from(data);
-}
-
-/* ERASE: we implement mass erase using 0x43 + 0xBC and then special payload 0xFF 0x00 */
-async function massErase(){
-  const CMD_ERASE = 0x43;
-  if(!(await sendCommand(CMD_ERASE))) return false;
-  // For mass erase, send 0xFF 0x00 per many AN3155 examples
-  await bleWriteBytes([0xFF, 0x00]);
-  // wait longer for erase
-  const ack = await waitForAck(ERASE_WAIT_MS+500);
-  if(ack !== 1){
-    logDebug('[BOOT] No ACK after mass erase');
-    return false;
-  }
-  return true;
-}
-
-/* ---------- CRC32 implementation (same as earlier) ---------- */
-function crc32(buf) {
-  let table = crc32.table;
-  if(!table) {
-    table = crc32.table = new Uint32Array(256);
-    for(let i=0;i<256;i++){
-      let c=i;
-      for(let j=0;j<8;j++){
-        c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
-      }
-      table[i]=c >>> 0;
-    }
-  }
-  let crc = 0xFFFFFFFF;
-  for(let i=0;i<buf.length;i++){
-    crc = table[(crc ^ buf[i]) & 0xFF] ^ (crc >>> 8);
-  }
-  return (crc ^ 0xFFFFFFFF) >>> 0;
-}
-
-/* ---------- High-level OTA flow ---------- */
-async function startOTA(){
-  otaAbort = false;
-  debugEl.textContent = '';
-  if(!writeChar || !notifyChar){ setOta('Not connected or notify char missing'); return; }
-  const fileInput = document.getElementById('fileInput');
-  if(!fileInput.files || fileInput.files.length === 0){ setOta('Select .bin first'); return; }
-  const file = fileInput.files[0];
-  const arrayBuffer = await file.arrayBuffer();
-  const fileBytes = new Uint8Array(arrayBuffer);
-  const size = fileBytes.length;
-  const fileCrc = crc32(fileBytes);
-  setOta(`Prepared ${file.name} (${size} bytes), CRC=${fileCrc.toString(16)}`);
-  bar.style.width = '0%';
-
-  // Subscribe to notify and push incoming bytes into queue
-  clearIncomingQueue();
-  await startNotify((arr) => {
-    // arr is Uint8Array
-    notifyHandlerPush(arr);
-  });
-
-  try{
-    // 1) handshake: send 0x7F and wait for ACK
-    setOta('Waiting for bootloader handshake (0x7F)...');
-    logDebug('[OTA] Sending handshake 0x7F');
-    let handshakeOk = false;
-    for(let attempt=1; attempt<=MAX_RETRIES; attempt++){
-      clearIncomingQueue();
-      await bleWriteBytes([0x7F]);
-      const ack = await waitForAck(HANDSHAKE_WAIT_MS);
-      if(ack === 1) { handshakeOk = true; break; }
-      logDebug(`[OTA] Handshake attempt ${attempt} returned ${ack === 0 ? 'NACK' : 'no reply'}`);
-      await sleep(200);
-    }
-    if(!handshakeOk) throw new Error('Bootloader handshake failed (no ACK 0x79)');
-
-    setOta('Bootloader ready. Asking for device info...');
-    // optional: send GET (0x00) to check bootloader; ignore result if not needed
-    await sendCommand(0x00);
-
-    // 2) Erase
-    setOta('Erasing flash (mass erase)...');
-    logDebug('[OTA] Sending mass erase');
-    if(!(await massErase())) throw new Error('Mass erase failed');
-
-    // 3) Write chunks
-    setOta('Writing firmware in chunks...');
-    let bytesWritten = 0;
-    let address = FLASH_ORIGIN;
-    for(let offset=0; offset < fileBytes.length; offset += CHUNK_SIZE){
-      if(otaAbort) throw new Error('OTA aborted by user');
-      const slice = fileBytes.subarray(offset, Math.min(fileBytes.length, offset + CHUNK_SIZE));
-      // For each chunk, retry up to MAX_RETRIES
-      let success = false;
-      for(let attempt=1; attempt<=MAX_RETRIES; attempt++){
-        clearIncomingQueue();
-        logDebug(`[OTA] Writing chunk @0x${(address+offset).toString(16)} len=${slice.length} attempt ${attempt}`);
-        const ok = await writeMemoryBlock(address + offset, Array.from(slice));
-        if(ok){ success = true; break; }
-        logDebug('[OTA] chunk NACK, retrying...');
-        await sleep(200);
-      }
-      if(!success) throw new Error(`Failed to write chunk at offset ${offset}`);
-      bytesWritten += slice.length;
-      bar.style.width = `${Math.round(bytesWritten / size * 100)}%`;
-    }
-
-    setOta('Write complete. Verifying readback...');
-    // 4) Read back and verify (read in reasonable blocks)
-    let readback = new Uint8Array(size);
-    let readOffset = 0;
-    while(readOffset < size){
-      const toRead = Math.min(256, size - readOffset);
-      clearIncomingQueue();
-      const data = await readMemoryBlock(FLASH_ORIGIN + readOffset, toRead);
-      if(!data) throw new Error('Readback failed at offset ' + readOffset);
-      readback.set(data, readOffset);
-      readOffset += toRead;
-      setOta(`Verifying... ${Math.round(readOffset/size*100)}%`);
-    }
-    const rbCrc = crc32(readback);
-    logDebug('[OTA] local CRC=', fileCrc.toString(16), 'readback CRC=', rbCrc.toString(16));
-    if(rbCrc !== fileCrc) throw new Error('CRC mismatch after readback');
-
-    setOta('Verification OK. Finishing.');
-    // 5) inform ESP32 to blink LED
-    await writeChar.writeValue(new TextEncoder().encode('FOTA_DONE'));
-    setOta('FOTA success! Remove BOOT0 → GND and RESET the board to boot new firmware.');
-  }catch(err){
-    setOta('OTA error: ' + (err.message || err));
-    logDebug('[OTA] Error:', err);
-  } finally {
-    await stopNotify();
-  }
-}
-
-function cancelOTA(){
-  otaAbort = true;
-  setOta('OTA canceled');
-  bar.style.width = '0%';
-}
-
-/* ---------- small helpers & wiring hints (displayed in debug) ---------- */
-logDebug('Page loaded. Steps to use:');
-logDebug('1) Connect to ESP32 (Connect button).');
-logDebug('2) Ensure ESP32 firmware with notify is flashed and ESP32 LED wiring is done.');
-logDebug('3) Put STM32 into bootloader: BOOT0=HIGH (Morpho E5) + press RESET.');
-logDebug('4) Then click Start OTA (select .bin). Monitor messages here.');
-</script>
 </body>
 </html>
